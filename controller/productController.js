@@ -80,12 +80,28 @@ const getSearchResult = async (req, res) => {
 };
 const addProduct = async (req, res) => {
   try {
+    // Ensure quickDiscount structure is properly set
+    const quickDiscountData = {
+      dollarAmount: req.body.quickDiscount?.dollarAmount || 0,
+      percentageAmount: req.body.quickDiscount?.percentageAmount || 0,
+      isActive: req.body.quickDiscount?.isActive || false,
+    };
+
+    // Ensure prices structure is properly set
+    const pricesData = {
+      originalPrice: req.body.prices?.originalPrice || req.body.originalPrice || 0,
+      tradePrice: req.body.prices?.tradePrice || req.body.tradePrice || 0,
+      price: req.body.prices?.price || req.body.price || 0,
+      discount: req.body.prices?.discount || req.body.discount || 0,
+    };
+
     const newProduct = new Product({
       ...req.body,
-      // productId: cname + (count + 1),
       productId: req.body.productId
         ? req.body.productId
         : mongoose.Types.ObjectId(),
+      quickDiscount: quickDiscountData,
+      prices: pricesData,
     });
 
     await newProduct.save();
@@ -708,22 +724,21 @@ const updateProduct = async (req, res) => {
       product.variants = req.body.variants;
       product.stock = req.body.stock;
       // Update prices object explicitly
-      product.prices.price = req.body.prices.price;
-      product.prices.originalPrice = req.body.prices.originalPrice;
-      product.prices.tradePrice = req.body.prices.tradePrice;
-      product.prices.discount = req.body.prices.discount;
+      product.prices.price = req.body.prices?.price ?? req.body.price ?? product.prices.price;
+      product.prices.originalPrice = req.body.prices?.originalPrice ?? req.body.originalPrice ?? product.prices.originalPrice;
+      product.prices.tradePrice = req.body.prices?.tradePrice ?? req.body.tradePrice ?? product.prices.tradePrice;
+      product.prices.discount = req.body.prices?.discount ?? req.body.discount ?? product.prices.discount;
 
       // Update profit margin object explicitly
       product.profitMargin.dollarDifference =
-        req.body.profitMargin.dollarDifference;
+        req.body.profitMargin?.dollarDifference ?? product.profitMargin.dollarDifference;
       product.profitMargin.percentageDifference =
-        req.body.profitMargin.percentageDifference;
+        req.body.profitMargin?.percentageDifference ?? product.profitMargin.percentageDifference;
 
-      // Update quick discount object explicitly
-      product.quickDiscount.dollarAmount = req.body.quickDiscount.dollarAmount;
-      product.quickDiscount.percentageAmount =
-        req.body.quickDiscount.percentageAmount;
-      product.quickDiscount.isActive = req.body.quickDiscount.isActive;
+      // Update quick discount object explicitly with proper handling
+      product.quickDiscount.dollarAmount = req.body.quickDiscount?.dollarAmount ?? 0;
+      product.quickDiscount.percentageAmount = req.body.quickDiscount?.percentageAmount ?? 0;
+      product.quickDiscount.isActive = req.body.quickDiscount?.isActive ?? false;
       product.image = req.body.image;
       product.tag = req.body.tag;
 
