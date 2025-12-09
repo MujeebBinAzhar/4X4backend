@@ -13,6 +13,9 @@ const {
   deleteProduct,
   deleteManyProducts,
   getShowingStoreProducts,
+  getProductStatusCounts, // Phase 3: Status counts
+  duplicateProduct, // Phase 4: Duplicate product
+  exportProductsToCSV, // Phase 6: Export to CSV
 } = require("../controller/productController");
 
 //add a product
@@ -32,6 +35,15 @@ router.get("/store", getShowingStoreProducts);
 
 //get all products
 router.get("/", getAllProducts);
+
+// Phase 3: Get status counts for tabs
+router.get("/status/counts", getProductStatusCounts);
+
+// Phase 4: Duplicate product
+router.post("/duplicate/:id", duplicateProduct);
+
+// Phase 6: Export products to CSV
+router.get("/export/csv", exportProductsToCSV);
 
 //get a product by slug
 router.get("/product/:slug", getProductBySlug);

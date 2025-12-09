@@ -4,13 +4,17 @@ const productSchema = new mongoose.Schema(
   {
     marginType: {
       type: String,
-      required: true,
-      enum: ["percentage", "fixed"],
+      required: false,
+      default: undefined,
+      // Removed enum constraint to allow undefined/null values without validation errors
+      // Validation can be done at application level if needed
     },
     discountType: {
       type: String,
-      required: true,
-      enum: ["percentage", "fixed"],
+      required: false,
+      default: undefined,
+      // Removed enum constraint to allow undefined/null values without validation errors
+      // Validation can be done at application level if needed
     },
     manufacturerSku: {
       type: String,
@@ -116,7 +120,7 @@ const productSchema = new mongoose.Schema(
     prices: {
       originalPrice: {
         type: Number,
-        required: true,
+        required: false,
       },
       tradePrice: {
         type: Number,
@@ -124,7 +128,7 @@ const productSchema = new mongoose.Schema(
       },
       price: {
         type: Number,
-        required: true,
+        required: false,
       },
       discount: {
         type: Number,
@@ -220,6 +224,30 @@ const productSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Pre-save hook to ensure marginType and discountType are never required
+productSchema.pre('save', function(next) {
+  // If marginType or discountType are empty strings, null, or undefined, set them to undefined
+  if (this.marginType === '' || this.marginType === null) {
+    this.marginType = undefined;
+  }
+  if (this.discountType === '' || this.discountType === null) {
+    this.discountType = undefined;
+  }
+  next();
+});
+
+// Pre-validate hook to skip validation for deprecated fields
+productSchema.pre('validate', function(next) {
+  // Skip validation for marginType and discountType if they're undefined
+  if (this.marginType === undefined) {
+    this.$locals.skipMarginTypeValidation = true;
+  }
+  if (this.discountType === undefined) {
+    this.$locals.skipDiscountTypeValidation = true;
+  }
+  next();
+});
 
 // module.exports = productSchema;
 

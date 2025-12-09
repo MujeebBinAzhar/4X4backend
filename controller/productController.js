@@ -3,6 +3,32 @@ const mongoose = require("mongoose");
 const Category = require("../models/Category");
 const { languageCodes } = require("../utils/data");
 const Review = require("../models/Review");
+const ProductAuditLog = require("../models/ProductAuditLog"); // Phase 6: Audit logging
+
+// Phase 6: Helper function to log product changes
+const logProductChange = async (
+  productId,
+  userId,
+  userName,
+  action,
+  changes,
+  req
+) => {
+  try {
+    await ProductAuditLog.create({
+      productId,
+      userId: userId || null,
+      userName: userName || "System",
+      action,
+      changes,
+      ipAddress: req.ip || req.connection.remoteAddress,
+      userAgent: req.headers["user-agent"] || "",
+    });
+  } catch (err) {
+    // Don't fail the request if logging fails
+    console.error("Failed to log product change:", err.message);
+  }
+};
 
 const getSearchResult = async (req, res) => {
   try {
@@ -89,23 +115,219 @@ const addProduct = async (req, res) => {
 
     // Ensure prices structure is properly set
     const pricesData = {
-      originalPrice: req.body.prices?.originalPrice || req.body.originalPrice || 0,
+      originalPrice:
+        req.body.prices?.originalPrice || req.body.originalPrice || 0,
       tradePrice: req.body.prices?.tradePrice || req.body.tradePrice || 0,
       price: req.body.prices?.price || req.body.price || 0,
       discount: req.body.prices?.discount || req.body.discount || 0,
     };
 
-    const newProduct = new Product({
-      ...req.body,
+    // Parse tags safely - handle stringified JSON or array
+    const parseTags = (tagData) => {
+      if (!tagData) return [];
+
+      if (Array.isArray(tagData)) {
+        return tagData.filter(
+          (tag) => tag && typeof tag === "string" && tag.trim()
+        );
+      }
+
+      if (typeof tagData === "string") {
+        let current = tagData;
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        while (attempts < maxAttempts) {
+          try {
+            const parsed = JSON.parse(current);
+
+            if (Array.isArray(parsed)) {
+              return parsed.filter(
+                (tag) => tag && typeof tag === "string" && tag.trim()
+              );
+            }
+
+            if (typeof parsed === "string") {
+              current = parsed;
+              attempts++;
+              continue;
+            }
+
+            return [parsed].filter(
+              (tag) => tag && typeof tag === "string" && tag.trim()
+            );
+          } catch (e) {
+            if (
+              current.trim() &&
+              !current.startsWith("[") &&
+              !current.startsWith('"')
+            ) {
+              return [current.trim()];
+            }
+            return [];
+          }
+        }
+
+        return [];
+      }
+
+      return [];
+    };
+
+    // Remove marginType and discountType from req.body to avoid validation issues
+    // These fields are deprecated and should not be set
+    const { marginType, discountType, ...restBody } = req.body;
+
+    const productData = {
+      ...restBody,
       productId: req.body.productId
         ? req.body.productId
         : mongoose.Types.ObjectId(),
       quickDiscount: quickDiscountData,
       prices: pricesData,
-    });
+      tag: parseTags(req.body.tag),
+      // marginType and discountType are deprecated - don't include them
+    };
+
+    const newProduct = new Product(productData);
 
     await newProduct.save();
+
+    // Phase 6: Log product creation
+    await logProductChange(
+      newProduct._id,
+      req.user?._id,
+      req.user?.name,
+      "create",
+      { product: newProduct.toObject() },
+      req
+    );
+
     res.send(newProduct);
+  } catch (err) {
+    res.status(500).send({
+      message: err.message,
+    });
+  }
+};
+
+// Phase 4: Duplicate product
+const duplicateProduct = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get the original product
+    const originalProduct = await Product.findById(id);
+
+    if (!originalProduct) {
+      return res.status(404).send({
+        message: "Product not found",
+      });
+    }
+
+    // Create a copy of the product data
+    const productData = originalProduct.toObject();
+
+    // Remove _id and __v to create a new document
+    delete productData._id;
+    delete productData.__v;
+    delete productData.createdAt;
+    delete productData.updatedAt;
+
+    // Generate new productId
+    productData.productId = mongoose.Types.ObjectId();
+
+    // Parse and clean tags using recursive parser
+    const parseTags = (tagData) => {
+      if (!tagData) return [];
+
+      if (Array.isArray(tagData)) {
+        return tagData.filter(
+          (tag) => tag && typeof tag === "string" && tag.trim()
+        );
+      }
+
+      if (typeof tagData === "string") {
+        let current = tagData;
+        let attempts = 0;
+        const maxAttempts = 10;
+
+        while (attempts < maxAttempts) {
+          try {
+            const parsed = JSON.parse(current);
+
+            if (Array.isArray(parsed)) {
+              return parsed.filter(
+                (tag) => tag && typeof tag === "string" && tag.trim()
+              );
+            }
+
+            if (typeof parsed === "string") {
+              current = parsed;
+              attempts++;
+              continue;
+            }
+
+            return [parsed].filter(
+              (tag) => tag && typeof tag === "string" && tag.trim()
+            );
+          } catch (e) {
+            if (
+              current.trim() &&
+              !current.startsWith("[") &&
+              !current.startsWith('"')
+            ) {
+              return [current.trim()];
+            }
+            return [];
+          }
+        }
+
+        return [];
+      }
+
+      return [];
+    };
+
+    productData.tag = parseTags(productData.tag);
+
+    // Modify title and slug to indicate it's a copy
+    if (productData.title && typeof productData.title === "object") {
+      Object.keys(productData.title).forEach((lang) => {
+        if (productData.title[lang]) {
+          productData.title[lang] = `${productData.title[lang]} (Copy)`;
+        }
+      });
+    } else if (typeof productData.title === "string") {
+      productData.title = `${productData.title} (Copy)`;
+    }
+
+    // Modify slug to make it unique
+    if (productData.slug) {
+      productData.slug = `${productData.slug}-copy-${Date.now()}`;
+    }
+
+    // Set status to "hide" (draft) for the duplicate
+    productData.status = "hide";
+
+    // Create new product
+    const duplicatedProduct = new Product(productData);
+    await duplicatedProduct.save();
+
+    // Phase 6: Log duplication
+    await logProductChange(
+      duplicatedProduct._id,
+      req.user?._id,
+      req.user?.name,
+      "duplicate",
+      { sourceProductId: id },
+      req
+    );
+
+    res.send({
+      message: "Product duplicated successfully",
+      product: duplicatedProduct,
+    });
   } catch (err) {
     res.status(500).send({
       message: err.message,
@@ -343,18 +565,71 @@ const getShowingProducts = async (req, res) => {
 };
 
 const getAllProducts = async (req, res) => {
-  const { title, category, price, page, limit } = req.query;
+  const {
+    title,
+    category,
+    price,
+    page,
+    limit,
+    search,
+    sort_by,
+    sort_dir,
+    status, // Phase 3: Status filter (all, published, drafts)
+    product_type, // Phase 3: Product type filter (simple, variable)
+    stock_status, // Phase 3: Stock status filter (in_stock, out_of_stock, on_backorder)
+    brand, // Phase 3: Brand filter
+  } = req.query;
 
   let queryObject = {};
   let sortObject = {};
-  if (title) {
+
+  // Enhanced search: name, SKU, or description
+  if (search || title) {
+    const searchTerm = search || title;
     const titleQueries = languageCodes.map((lang) => ({
-      [`title.${lang}`]: { $regex: `${title}`, $options: "i" },
+      [`title.${lang}`]: { $regex: `${searchTerm}`, $options: "i" },
     }));
-    queryObject.$or = titleQueries;
+    const descriptionQueries = languageCodes.map((lang) => ({
+      [`description.${lang}`]: { $regex: `${searchTerm}`, $options: "i" },
+    }));
+    queryObject.$or = [
+      ...titleQueries,
+      ...descriptionQueries,
+      { sku: { $regex: `${searchTerm}`, $options: "i" } },
+      { manufacturerSku: { $regex: `${searchTerm}`, $options: "i" } },
+      { internalSku: { $regex: `${searchTerm}`, $options: "i" } },
+    ];
   }
 
-  if (price === "low") {
+  // Handle new sort_by and sort_dir parameters (Phase 2)
+  // Priority: sort_by/sort_dir > price parameter
+  if (sort_by && sort_dir) {
+    const sortDirection = sort_dir === "asc" ? 1 : -1;
+    switch (sort_by) {
+      case "name":
+        // Sort by title in default language (en) or first available language
+        sortObject = { "title.en": sortDirection };
+        break;
+      case "sku":
+        sortObject = { sku: sortDirection };
+        break;
+      case "price":
+        // Use originalPrice for consistency with old price filter behavior
+        sortObject = { "prices.originalPrice": sortDirection };
+        break;
+      case "date":
+        sortObject = { updatedAt: sortDirection };
+        break;
+      case "stock":
+        sortObject = { stock: sortDirection };
+        break;
+      case "brand":
+        sortObject = { "brand.name": sortDirection };
+        break;
+      default:
+        sortObject = { updatedAt: -1 }; // Default: Date descending
+    }
+  } else if (price === "low") {
     sortObject = {
       "prices.originalPrice": 1,
     };
@@ -379,7 +654,44 @@ const getAllProducts = async (req, res) => {
   } else if (price === "date-updated-desc") {
     sortObject.updatedAt = -1;
   } else {
-    sortObject = { _id: -1 };
+    // Default sort: Date (descending) per requirements
+    sortObject = { updatedAt: -1 };
+  }
+
+  // Phase 3: Status filter (All, Published, Drafts)
+  if (status && status !== "all") {
+    if (status === "published") {
+      queryObject.status = "show";
+    } else if (status === "drafts") {
+      queryObject.status = "hide";
+    }
+  }
+
+  // Phase 3: Product Type filter (Simple, Variable)
+  if (product_type) {
+    if (product_type === "simple") {
+      // Simple products: not a combination
+      queryObject.isCombination = false;
+    } else if (product_type === "variable") {
+      // Variable products: is a combination
+      queryObject.isCombination = true;
+    }
+  }
+
+  // Phase 3: Stock Status filter (In stock, Out of stock, On backorder)
+  if (stock_status) {
+    if (stock_status === "in_stock") {
+      queryObject.stock = { $gt: 0 };
+    } else if (stock_status === "out_of_stock") {
+      queryObject.$or = [{ stock: { $exists: false } }, { stock: { $lte: 0 } }];
+    } else if (stock_status === "on_backorder") {
+      queryObject.stock = { $lt: 0 }; // Negative stock indicates backorder
+    }
+  }
+
+  // Phase 3: Brand filter
+  if (brand) {
+    queryObject.brand = brand;
   }
 
   // console.log('sortObject', sortObject);
@@ -398,6 +710,7 @@ const getAllProducts = async (req, res) => {
     const products = await Product.find(queryObject)
       .populate({ path: "category", select: "_id name" })
       .populate({ path: "categories", select: "_id name" })
+      .populate({ path: "brand", select: "_id name slug" })
       .sort(sortObject)
       .skip(skip)
       .limit(limits);
@@ -724,27 +1037,100 @@ const updateProduct = async (req, res) => {
       product.variants = req.body.variants;
       product.stock = req.body.stock;
       // Update prices object explicitly
-      product.prices.price = req.body.prices?.price ?? req.body.price ?? product.prices.price;
-      product.prices.originalPrice = req.body.prices?.originalPrice ?? req.body.originalPrice ?? product.prices.originalPrice;
-      product.prices.tradePrice = req.body.prices?.tradePrice ?? req.body.tradePrice ?? product.prices.tradePrice;
-      product.prices.discount = req.body.prices?.discount ?? req.body.discount ?? product.prices.discount;
+      product.prices.price =
+        req.body.prices?.price ?? req.body.price ?? product.prices.price;
+      product.prices.originalPrice =
+        req.body.prices?.originalPrice ??
+        req.body.originalPrice ??
+        product.prices.originalPrice;
+      product.prices.tradePrice =
+        req.body.prices?.tradePrice ??
+        req.body.tradePrice ??
+        product.prices.tradePrice;
+      product.prices.discount =
+        req.body.prices?.discount ??
+        req.body.discount ??
+        product.prices.discount;
 
       // Update profit margin object explicitly
       product.profitMargin.dollarDifference =
-        req.body.profitMargin?.dollarDifference ?? product.profitMargin.dollarDifference;
+        req.body.profitMargin?.dollarDifference ??
+        product.profitMargin.dollarDifference;
       product.profitMargin.percentageDifference =
-        req.body.profitMargin?.percentageDifference ?? product.profitMargin.percentageDifference;
+        req.body.profitMargin?.percentageDifference ??
+        product.profitMargin.percentageDifference;
 
       // Update quick discount object explicitly with proper handling
-      product.quickDiscount.dollarAmount = req.body.quickDiscount?.dollarAmount ?? 0;
-      product.quickDiscount.percentageAmount = req.body.quickDiscount?.percentageAmount ?? 0;
-      product.quickDiscount.isActive = req.body.quickDiscount?.isActive ?? false;
+      product.quickDiscount.dollarAmount =
+        req.body.quickDiscount?.dollarAmount ?? 0;
+      product.quickDiscount.percentageAmount =
+        req.body.quickDiscount?.percentageAmount ?? 0;
+      product.quickDiscount.isActive =
+        req.body.quickDiscount?.isActive ?? false;
       product.image = req.body.image;
-      product.tag = req.body.tag;
 
-      // Update new fields
-      product.marginType = req.body.marginType;
-      product.discountType = req.body.discountType;
+      // Fix tags: handle stringified JSON or array - use recursive parser
+      // Allow tags to be removed by setting to empty array
+      const parseTags = (tagData) => {
+        if (tagData === null || tagData === undefined || tagData === "")
+          return [];
+
+        if (Array.isArray(tagData)) {
+          return tagData.filter(
+            (tag) => tag && typeof tag === "string" && tag.trim()
+          );
+        }
+
+        if (typeof tagData === "string") {
+          let current = tagData;
+          let attempts = 0;
+          const maxAttempts = 10;
+
+          while (attempts < maxAttempts) {
+            try {
+              const parsed = JSON.parse(current);
+
+              if (Array.isArray(parsed)) {
+                return parsed.filter(
+                  (tag) => tag && typeof tag === "string" && tag.trim()
+                );
+              }
+
+              if (typeof parsed === "string") {
+                current = parsed;
+                attempts++;
+                continue;
+              }
+
+              return [parsed].filter(
+                (tag) => tag && typeof tag === "string" && tag.trim()
+              );
+            } catch (e) {
+              if (
+                current.trim() &&
+                !current.startsWith("[") &&
+                !current.startsWith('"')
+              ) {
+                return [current.trim()];
+              }
+              return [];
+            }
+          }
+
+          return [];
+        }
+
+        return [];
+      };
+
+      // Always parse tags - allows removal by sending empty array or null
+      if (req.body.tag !== undefined) {
+        product.tag = parseTags(req.body.tag);
+      }
+
+      // marginType and discountType are deprecated - don't update them at all
+      // They will keep their existing values or remain undefined
+      // This prevents validation errors when these fields are not in the request body
       product.manufacturerSku = req.body.manufacturerSku;
       product.internalSku = req.body.internalSku;
       product.additionalProductDetails = req.body.additionalProductDetails;
@@ -759,7 +1145,34 @@ const updateProduct = async (req, res) => {
       product.shipOutLocation = req.body.shipOutLocation;
       product.directSupplierLink = req.body.directSupplierLink;
 
+      // Phase 6: Log changes before saving
+      const oldProduct = await Product.findById(req.params.id).lean();
+      const changes = {};
+
+      // Compare and track changes
+      Object.keys(req.body).forEach((key) => {
+        if (JSON.stringify(oldProduct[key]) !== JSON.stringify(req.body[key])) {
+          changes[key] = {
+            old: oldProduct[key],
+            new: req.body[key],
+          };
+        }
+      });
+
       await product.save();
+
+      // Log the changes
+      if (Object.keys(changes).length > 0) {
+        await logProductChange(
+          product._id,
+          req.user?._id,
+          req.user?.name,
+          "update",
+          changes,
+          req
+        );
+      }
+
       res.send({ data: product, message: "Product updated successfully!" });
     } else {
       res.status(404).send({
@@ -779,11 +1192,92 @@ const updateManyProducts = async (req, res) => {
       if (
         req.body[key] !== "[]" &&
         Object.entries(req.body[key]).length > 0 &&
-        req.body[key] !== req.body.ids
+        req.body[key] !== req.body.ids &&
+        key !== "ids" // Exclude 'ids' from being set as a field
       ) {
-        // console.log('req.body[key]', typeof req.body[key]);
-        updatedData[key] = req.body[key];
+        // Special handling for 'tag' field - use recursive parser
+        if (key === "tag") {
+          const parseTags = (tagData) => {
+            if (!tagData) return [];
+
+            if (Array.isArray(tagData)) {
+              return tagData.filter(
+                (tag) => tag && typeof tag === "string" && tag.trim()
+              );
+            }
+
+            if (typeof tagData === "string") {
+              let current = tagData;
+              let attempts = 0;
+              const maxAttempts = 10;
+
+              while (attempts < maxAttempts) {
+                try {
+                  const parsed = JSON.parse(current);
+
+                  if (Array.isArray(parsed)) {
+                    return parsed.filter(
+                      (tag) => tag && typeof tag === "string" && tag.trim()
+                    );
+                  }
+
+                  if (typeof parsed === "string") {
+                    current = parsed;
+                    attempts++;
+                    continue;
+                  }
+
+                  return [parsed].filter(
+                    (tag) => tag && typeof tag === "string" && tag.trim()
+                  );
+                } catch (e) {
+                  if (
+                    current.trim() &&
+                    !current.startsWith("[") &&
+                    !current.startsWith('"')
+                  ) {
+                    return [current.trim()];
+                  }
+                  return [];
+                }
+              }
+
+              return [];
+            }
+
+            return [];
+          };
+
+          updatedData[key] = parseTags(req.body[key]);
+        } else if (key === "marginType" || key === "discountType") {
+          // Only set if valid enum value
+          if (
+            req.body[key] &&
+            ["percentage", "fixed"].includes(req.body[key])
+          ) {
+            updatedData[key] = req.body[key];
+          }
+        } else {
+          updatedData[key] = req.body[key];
+        }
       }
+    }
+
+    // Handle specific fields like 'isFeatured' and 'stock'
+    if (req.body.isFeatured !== undefined) {
+      updatedData.isFeatured = req.body.isFeatured;
+    }
+    if (req.body.stock !== undefined) {
+      updatedData.stock = req.body.stock;
+    }
+    if (req.body.status !== undefined) {
+      updatedData.status = req.body.status;
+    }
+    if (req.body.categories !== undefined) {
+      updatedData.categories = req.body.categories;
+    }
+    if (req.body.category !== undefined) {
+      updatedData.category = req.body.category;
     }
 
     // console.log("updated data", updatedData);
@@ -797,6 +1291,21 @@ const updateManyProducts = async (req, res) => {
         multi: true,
       }
     );
+
+    // Phase 6: Log bulk update
+    if (req.body.ids && req.body.ids.length > 0) {
+      for (const productId of req.body.ids) {
+        await logProductChange(
+          productId,
+          req.user?._id,
+          req.user?.name,
+          "bulk_update",
+          updatedData,
+          req
+        );
+      }
+    }
+
     res.send({
       message: "Products update successfully!",
     });
@@ -943,6 +1452,248 @@ const getShowingStoreProducts = async (req, res) => {
   }
 };
 
+// Phase 3: Get status counts for tabs (All, Published, Drafts)
+const getProductStatusCounts = async (req, res) => {
+  try {
+    const allCount = await Product.countDocuments({});
+    const publishedCount = await Product.countDocuments({ status: "show" });
+    const draftsCount = await Product.countDocuments({ status: "hide" });
+
+    res.send({
+      all: allCount,
+      published: publishedCount,
+      drafts: draftsCount,
+    });
+  } catch (err) {
+    res.status(500).send({
+      message: err.message,
+    });
+  }
+};
+
+// Phase 6: Export products to CSV with filters
+const exportProductsToCSV = async (req, res) => {
+  try {
+    const {
+      search,
+      status,
+      category,
+      product_type,
+      stock_status,
+      brand,
+      sort_by,
+      sort_dir,
+    } = req.query;
+
+    let queryObject = {};
+    let sortObject = { updatedAt: -1 };
+
+    // Apply same filters as getAllProducts
+    if (search) {
+      const titleQueries = languageCodes.map((lang) => ({
+        [`title.${lang}`]: { $regex: `${search}`, $options: "i" },
+      }));
+      const descriptionQueries = languageCodes.map((lang) => ({
+        [`description.${lang}`]: { $regex: `${search}`, $options: "i" },
+      }));
+      queryObject.$or = [
+        ...titleQueries,
+        ...descriptionQueries,
+        { sku: { $regex: `${search}`, $options: "i" } },
+        { manufacturerSku: { $regex: `${search}`, $options: "i" } },
+        { internalSku: { $regex: `${search}`, $options: "i" } },
+      ];
+    }
+
+    if (status && status !== "all") {
+      if (status === "published") {
+        queryObject.status = "show";
+      } else if (status === "drafts") {
+        queryObject.status = "hide";
+      }
+    }
+
+    if (product_type) {
+      if (product_type === "simple") {
+        queryObject.isCombination = false;
+      } else if (product_type === "variable") {
+        queryObject.isCombination = true;
+      }
+    }
+
+    if (stock_status) {
+      if (stock_status === "in_stock") {
+        queryObject.stock = { $gt: 0 };
+      } else if (stock_status === "out_of_stock") {
+        queryObject.$or = [
+          { stock: { $exists: false } },
+          { stock: { $lte: 0 } },
+        ];
+      } else if (stock_status === "on_backorder") {
+        queryObject.stock = { $lt: 0 };
+      }
+    }
+
+    if (brand) {
+      queryObject.brand = brand;
+    }
+
+    if (category) {
+      queryObject.categories = category;
+    }
+
+    // Apply sorting
+    if (sort_by && sort_dir) {
+      const sortDirection = sort_dir === "asc" ? 1 : -1;
+      switch (sort_by) {
+        case "name":
+          sortObject = { "title.en": sortDirection };
+          break;
+        case "sku":
+          sortObject = { sku: sortDirection };
+          break;
+        case "price":
+          sortObject = { "prices.price": sortDirection };
+          break;
+        case "date":
+          sortObject = { updatedAt: sortDirection };
+          break;
+        case "stock":
+          sortObject = { stock: sortDirection };
+          break;
+        case "brand":
+          sortObject = { "brand.name": sortDirection };
+          break;
+      }
+    }
+
+    // Get all products matching filters (no pagination for export)
+    const products = await Product.find(queryObject)
+      .populate({ path: "category", select: "_id name" })
+      .populate({ path: "categories", select: "_id name" })
+      .populate({ path: "brand", select: "_id name slug" })
+      .sort(sortObject);
+
+    // Format data for CSV
+    const csvData = products.map((product) => {
+      const categories = product.categories || [];
+      const categoryNames =
+        categories.length > 0
+          ? categories
+              .map((cat) => cat?.name?.en || cat?.name || "")
+              .join(" | ")
+          : product?.category?.name?.en || product?.category?.name || "";
+
+      // Parse tags safely - handle multiple levels of stringification
+      const parseTags = (tagData) => {
+        if (!tagData) return [];
+
+        if (Array.isArray(tagData)) {
+          return tagData.filter(
+            (tag) => tag && typeof tag === "string" && tag.trim()
+          );
+        }
+
+        if (typeof tagData === "string") {
+          let current = tagData;
+          let attempts = 0;
+          const maxAttempts = 10;
+
+          while (attempts < maxAttempts) {
+            try {
+              const parsed = JSON.parse(current);
+
+              if (Array.isArray(parsed)) {
+                return parsed.filter(
+                  (tag) => tag && typeof tag === "string" && tag.trim()
+                );
+              }
+
+              if (typeof parsed === "string") {
+                current = parsed;
+                attempts++;
+                continue;
+              }
+
+              return [parsed].filter(
+                (tag) => tag && typeof tag === "string" && tag.trim()
+              );
+            } catch (e) {
+              if (
+                current.trim() &&
+                !current.startsWith("[") &&
+                !current.startsWith('"')
+              ) {
+                return [current.trim()];
+              }
+              return [];
+            }
+          }
+
+          return [];
+        }
+
+        return [];
+      };
+
+      const tags = parseTags(product.tag);
+      const tagNames = tags.join(" | ");
+
+      return {
+        ID: product._id,
+        Name: product.title?.en || product.title || "",
+        SKU: product.sku || "",
+        Status: product.status === "show" ? "Published" : "Draft",
+        Stock: product.stock || 0,
+        Price: product.prices?.price || product.prices?.originalPrice || 0,
+        Categories: categoryNames,
+        Tags: tagNames,
+        Brand: product.brand?.name || "",
+        Featured: product.isFeatured ? "Yes" : "No",
+        "Date Modified": product.updatedAt
+          ? new Date(product.updatedAt).toISOString().split("T")[0]
+          : "",
+      };
+    });
+
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=products_export_${new Date()
+        .toISOString()
+        .split("T")[0]
+        .replace(/-/g, "")}_${Date.now()}.csv`
+    );
+
+    // Convert to CSV
+    if (csvData.length === 0) {
+      return res.send(
+        "ID,Name,SKU,Status,Stock,Price,Categories,Tags,Brand,Featured,Date Modified\n"
+      );
+    }
+
+    const headers = Object.keys(csvData[0]).join(",");
+    const rows = csvData.map((row) =>
+      Object.values(row)
+        .map((val) => {
+          // Escape commas and quotes in CSV
+          const str = String(val || "");
+          if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+            return `"${str.replace(/"/g, '""')}"`;
+          }
+          return str;
+        })
+        .join(",")
+    );
+
+    res.send([headers, ...rows].join("\n"));
+  } catch (err) {
+    res.status(500).send({
+      message: err.message,
+    });
+  }
+};
+
 const deleteManyProducts = async (req, res) => {
   try {
     const cname = req.cname;
@@ -981,4 +1732,7 @@ module.exports = {
   getSiteProducts,
   getProductByid,
   getSearchResult,
+  getProductStatusCounts, // Phase 3: Status counts for tabs
+  duplicateProduct, // Phase 4: Duplicate product
+  exportProductsToCSV, // Phase 6: Export to CSV
 };
