@@ -1,0 +1,29 @@
+# cat .env
+SOURCE_COMMIT=a761fc23691507a1398ae6984783d45e29a44422
+COOLIFY_URL=https://backend.all4x4test.shop
+COOLIFY_FQDN=backend.all4x4test.shop
+COOLIFY_BRANCH="main"
+COOLIFY_CONTAINER_NAME="vc4wkkww8cowwwcccsgws0wg-204141487954"
+ADMIN_URL=https://dashboard.all4x4test.shop
+AMOUNT_STEP=5.0
+AUS_POST_AUTH_KEY=84507277-aba2-4e0d-a800-7f51d01fd5c2
+CURRENCY=usd
+EMAIL_PASS=your email password
+EMAIL_PORT=465
+EMAIL_USER=your email
+HOST=smtp.gmail.com
+JWT_SECRET=alamsfdfsdsdfsdfsdfsdfsdfsdrafdar!@#$0fddlfjdfdfdssfds
+JWT_SECRET_FOR_VERIFY=lfjfjasjfsdfsfr09ri09wfsdfsdfrilfdjdj
+MAX_AMOUNT=5000.0
+MIN_AMOUNT=10.0
+
+
+MONGO_URI=mongodb://root:3aumxOz3FhPSDPaB9P4NtEXFERzoFuoNTNtJfFUKf1V5AdgxpYbcQE5CnfoFBT0S@188.245.115.10:5432/?directConnection=true
+PORT=5055
+SENDGRID_API_KEY=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
+SERVICE=gmail
+STORE_URL=https://website.all4x4test.shop
+STRIPE_KEY=your Secret key
+STRIPE_PAYMENT_DESCRIPTION=This is Kachabazar payment with Stripe!# 
+
+

@@ -57,6 +57,11 @@ const registerCustomer = async (req, res) => {
     name,
     email,
     password: bcrypt.hashSync(password),
+    // CBSG defaults: new users require approval
+    approved: false,
+    is_public: true,
+    provider: 'native',
+    comment_permissions: 'everyone',
   });
   newUser.save();
   const token = signInToken(newUser);
@@ -218,6 +223,11 @@ const signUpWithProvider = async (req, res) => {
         name: user.name,
         email: user.email,
         image: user.picture,
+        // CBSG defaults: new users require approval
+        approved: false,
+        is_public: true,
+        provider: 'google', // or 'meta' based on provider
+        comment_permissions: 'everyone',
       });
 
       const signUpCustomer = await newUser.save();
@@ -258,6 +268,11 @@ const signUpWithOauthProvider = async (req, res) => {
         name: req.body.name,
         email: req.body.email,
         image: req.body.image,
+        // CBSG defaults: new users require approval
+        approved: false,
+        is_public: true,
+        provider: 'meta', // or determine from req.body
+        comment_permissions: 'everyone',
       });
 
       const signUpCustomer = await newUser.save();

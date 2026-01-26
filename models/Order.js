@@ -91,8 +91,52 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["Payment-Processing","Pending", "Processing","Out-for-Delivery", "Delivered", "Cancel"],
+      enum: [
+        "Payment-Processing",
+        "Pending",
+        "Processing",
+        "Awaiting Stock",
+        "On-Hold",
+        "Picking/Packing",
+        "Awaiting Delivery",
+        "Out-for-Delivery",
+        "Delivered",
+        "Completed",
+        "Cancel",
+        "Cancelled",
+        "Refunded",
+      ],
     },
+    shipmentTracking: {
+      type: String,
+      required: false,
+    },
+    origin: {
+      type: String,
+      required: false,
+      default: "Website",
+    },
+    isTrashed: {
+      type: Boolean,
+      default: false,
+    },
+    staffNotes: [
+      {
+        note: {
+          type: String,
+          required: true,
+        },
+        addedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Admin",
+          required: true,
+        },
+        addedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   {
     timestamps: true,

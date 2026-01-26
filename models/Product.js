@@ -206,6 +206,10 @@ const productSchema = new mongoose.Schema(
       ref: "Brand",
       required: false,
     },
+    is_visible: {
+      type: Boolean,
+      default: true,
+    },
     metaTitle: {
       type: String,
       required: false,

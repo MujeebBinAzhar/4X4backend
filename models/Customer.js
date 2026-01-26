@@ -135,6 +135,45 @@ const customerSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
+    // CBSG (Customer Build & Social Garage) fields
+    handle: {
+      type: String,
+      required: false,
+      unique: true,
+      sparse: true, // Allow multiple null values
+      lowercase: true,
+      trim: true,
+      validate: {
+        validator: function(v) {
+          if (!v) return true; // Optional field
+          // 3-20 characters, alphanumeric + underscore only
+          return /^[a-z0-9_]{3,20}$/.test(v);
+        },
+        message: 'Handle must be 3-20 characters, alphanumeric and underscores only'
+      }
+    },
+    approved: {
+      type: Boolean,
+      default: false, // Requires admin approval
+    },
+    is_public: {
+      type: Boolean,
+      default: true, // Public profile by default
+    },
+    avatar_url: {
+      type: String,
+      required: false,
+    },
+    provider: {
+      type: String,
+      enum: ['google', 'meta', 'native'],
+      default: 'native',
+    },
+    comment_permissions: {
+      type: String,
+      enum: ['everyone', 'followers', 'none'],
+      default: 'everyone',
+    },
   },
   {
     timestamps: true,

@@ -36,6 +36,13 @@ const adminContactRoutes = require("../routes/adminContactRoutes");
 const adminNewsletterRoutes = require("../routes/adminNewsletterRoutes");
 const websiteContactRoutes = require("../routes/websiteContactRoutes");
 const websiteNewsletterRoutes = require("../routes/websiteNewsletter");
+const cbsgUserRoutes = require("../routes/cbsgUserRoutes");
+const buildRoutes = require("../routes/buildRoutes");
+const commentRoutes = require("../routes/commentRoutes");
+const buildPostRoutes = require("../routes/buildPostRoutes");
+const moderationRoutes = require("../routes/moderationRoutes");
+const cbsgSettingsRoutes = require("../routes/cbsgSettingsRoutes");
+const uploadRoutes = require("../routes/uploadRoutes");
 
 const { isAuth, isAdmin } = require("../config/auth");
 // const {
@@ -52,9 +59,14 @@ const app = express();
 app.set("trust proxy", 1);
 
 app.use(express.json({ limit: "4mb" }));
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.options("*", cors()); // include before other routes
-app.use(cors());
+app.use(cors({
+  origin: true, // Allow all origins
+  credentials: true,
+}));
 
 //root route
 app.get("/", (req, res) => {
@@ -94,9 +106,29 @@ app.use("/api/website/contact", websiteContactRoutes);
 app.use("/api/website/newsletter", websiteNewsletterRoutes);
 app.use("/api/website/setting", settingRoutes);
 
+// CBSG (Customer Build & Social Garage) routes
+app.use("/api/users", cbsgUserRoutes);
+app.use("/api/builds", buildRoutes);
+app.use("/api/comments", commentRoutes);
+app.use("/api/posts", buildPostRoutes);
+app.use("/api/moderation", moderationRoutes);
+app.use("/api/settings/cbsg", cbsgSettingsRoutes);
+app.use("/api/upload", uploadRoutes);
+
 //if you not use admin dashboard then these two route will not needed.
 app.use("/api/admin/", adminRoutes);
 app.use("/api/orders/", orderRoutes);
+
+// Serve static files from the "dist" directory
+app.use("/static", express.static("public"));
+
+// Serve uploaded images - MUST be before catch-all route
+app.use("/uploads", express.static(path.join(__dirname, "..", "uploads"), {
+  setHeaders: (res, path) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  }
+}));
 
 // Use express's default error handling middleware
 app.use((err, req, res, next) => {
@@ -104,10 +136,7 @@ app.use((err, req, res, next) => {
   res.status(400).json({ message: err.message });
 });
 
-// Serve static files from the "dist" directory
-app.use("/static", express.static("public"));
-
-// Serve the index.html file for all routes
+// Serve the index.html file for all routes (catch-all - must be last)
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "build", "index.html"));
 });

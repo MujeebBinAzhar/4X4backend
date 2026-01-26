@@ -19,7 +19,13 @@ const addGlobalSetting = async (req, res) => {
 const getGlobalSetting = async (req, res) => {
   try {
     const globalSetting = await Setting.findOne({ name: "globalSetting" });
-    console.log(globalSetting)
+    console.log(globalSetting);
+
+    // If no global setting exists yet, return a safe default object
+    if (!globalSetting || !globalSetting.setting) {
+      return res.send({});
+    }
+
     res.send(globalSetting.setting);
   } catch (err) {
     res.status(500).send({
@@ -705,7 +711,9 @@ const addStockManagementSetting = async (req, res) => {
 
 const getStockManagementSetting = async (req, res) => {
   try {
-    const stockManagementSetting = await Setting.find({ name: "stockManagementSetting" });
+    const stockManagementSetting = await Setting.find({
+      name: "stockManagementSetting",
+    });
     res.status(200).send({
       data: stockManagementSetting,
       message: "Stock management settings retrieved successfully!",
@@ -720,7 +728,7 @@ const getStockManagementSetting = async (req, res) => {
 const updateStockManagementSetting = async (req, res) => {
   try {
     const setting = req.body.setting;
-    
+
     const stockManagementSetting = await Setting.findOneAndUpdate(
       { name: "stockManagementSetting" },
       {
@@ -729,7 +737,8 @@ const updateStockManagementSetting = async (req, res) => {
           "setting.high_stock_threshold": setting.high_stock_threshold,
           "setting.enable_backorder": setting.enable_backorder,
           "setting.custom_warning_message": setting.custom_warning_message,
-          "setting.show_stock_warnings_checkout": setting.show_stock_warnings_checkout,
+          "setting.show_stock_warnings_checkout":
+            setting.show_stock_warnings_checkout,
         },
       },
       { new: true, upsert: true }

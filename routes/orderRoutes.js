@@ -6,41 +6,48 @@ const {
   getOrderCustomer,
   updateOrder,
   deleteOrder,
+  bulkUpdateOrders,
+  addOrderNote,
+  exportOrders,
   bestSellerProductChart,
   getDashboardOrders,
   getDashboardRecentOrder,
   getDashboardCount,
   getDashboardAmount,
 } = require("../controller/orderController");
+const { isAuth, isAdmin } = require("../config/auth");
 
-//get all orders
-router.get("/", getAllOrders);
-
-// get dashboard orders data
+// Dashboard routes (no auth required for backward compatibility - can be added later)
 router.get("/dashboard", getDashboardOrders);
-
-// dashboard recent-order
 router.get("/dashboard-recent-order", getDashboardRecentOrder);
-
-// dashboard order count
 router.get("/dashboard-count", getDashboardCount);
-
-// dashboard order amount
 router.get("/dashboard-amount", getDashboardAmount);
-
-// chart data for product
 router.get("/best-seller/chart", bestSellerProductChart);
 
-//get all order by a user
-router.get("/customer/:id", getOrderCustomer);
+// OMS Routes - Admin only
+// Get all orders with filters (enhanced)
+router.get("/", isAuth, isAdmin, getAllOrders);
 
-//get a order by id
-router.get("/:id", getOrderById);
+// Export orders to CSV
+router.get("/export", isAuth, isAdmin, exportOrders);
 
-//update a order
-router.put("/:id", updateOrder);
+// Get order by customer ID
+router.get("/customer/:id", isAuth, isAdmin, getOrderCustomer);
 
-//delete a order
-router.delete("/:id", deleteOrder);
+// Get single order by ID (enhanced with status history)
+router.get("/:id", isAuth, isAdmin, getOrderById);
+
+// Update order (enhanced with status history logging)
+router.put("/:id", isAuth, isAdmin, updateOrder);
+router.patch("/:id", isAuth, isAdmin, updateOrder); // Support PATCH as well
+
+// Bulk update orders
+router.post("/bulk", isAuth, isAdmin, bulkUpdateOrders);
+
+// Add note to order
+router.post("/:id/notes", isAuth, isAdmin, addOrderNote);
+
+// Delete order (soft delete - move to trash)
+router.delete("/:id", isAuth, isAdmin, deleteOrder);
 
 module.exports = router;
