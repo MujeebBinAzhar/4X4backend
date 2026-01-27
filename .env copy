@@ -20,7 +20,7 @@ MIN_AMOUNT=10.0
 
 MONGO_URI=mongodb://root:3aumxOz3FhPSDPaB9P4NtEXFERzoFuoNTNtJfFUKf1V5AdgxpYbcQE5CnfoFBT0S@188.245.115.10:5432/?directConnection=true
 PORT=5055
-SENDGRID_API_KEY=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
+SENDGRID_API_KEY=
 SERVICE=gmail
 STORE_URL=https://website.all4x4test.shop
 STRIPE_KEY=your Secret key
